@@ -3111,6 +3111,7 @@ const dataStore = {
         if (!S.loginLog)         S.loginLog = [];
         if (!S.pendingApprovals) S.pendingApprovals = [];
         if (!S.notifSnooze)      S.notifSnooze = {};
+        if (S.gcashCapital === undefined) S.gcashCapital = 0;
         if (!S._syncMeta)        S._syncMeta = { ..._DEFAULT_STATE._syncMeta };
         if (!S._syncMeta.deviceId) {
           S._syncMeta.deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -3652,6 +3653,20 @@ function doLogin(){
     switchTab('dashboard');
     updBadge();
     updateStoreBanner();
+    // After UI is shown, silently refresh from IDB in case admin updated
+    // data (e.g. gcashCapital, rates, products) on another session.
+    // This ensures cashier always sees the latest values without blocking login.
+    dataStore._loadAsync().then(function(){
+      // Re-render any panel that shows data that could be stale
+      // Only re-render panels that are NOT currently visible to avoid flicker
+      const activePanel = document.querySelector('.panel.active');
+      const activeId = activePanel ? activePanel.id : '';
+      if (activeId !== 'tab-gcash')    renderGC();   // refresh rates + capital
+      if (activeId !== 'tab-dashboard') renderDash(); // refresh metrics
+      updBadge();
+    }).catch(function(){
+      // IDB unavailable — localStorage data already loaded, continue normally
+    });
   }catch(err){
     // Render error — show it clearly in the login screen
     console.error('[POS] Login render error:',err);
