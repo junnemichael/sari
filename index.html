@@ -742,6 +742,7 @@ input,select,textarea{padding:10px 13px;font-size:14px}
              </select>
            </div>
            <div class="fi"><label class="fl">Amount (₱)</label><input type="number" id="gca" oninput="calcGF()"/></div>
+           <div id="gc-wallet-warning"></div>
            <div id="gch" style="display:none" class="al alg"></div>
            <div class="fi"><label class="fl">Service fee earned (₱)</label><input type="number" id="gcf"/></div>
            <div id="gcmsg"></div>
@@ -3112,6 +3113,11 @@ const dataStore = {
         if (!S.pendingApprovals) S.pendingApprovals = [];
         if (!S.notifSnooze)      S.notifSnooze = {};
         if (S.gcashCapital === undefined) S.gcashCapital = 0;
+        // Always prefer the dedicated capital key (set by admin, read by all)
+        try {
+          const dedicatedCap = localStorage.getItem('kss_gcash_capital');
+          if (dedicatedCap !== null) S.gcashCapital = parseFloat(dedicatedCap) || 0;
+        } catch(e) {}
         if (!S._syncMeta)        S._syncMeta = { ..._DEFAULT_STATE._syncMeta };
         if (!S._syncMeta.deviceId) {
           S._syncMeta.deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -3134,7 +3140,6 @@ const dataStore = {
   // Falls back to localStorage if IDB is unavailable or empty.
   _loadAsync() {
     return idbStore.get('kss_state', 'main').then(raw => {
-      // IDB had data — use it and sync back to localStorage for speed
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
@@ -3145,19 +3150,20 @@ const dataStore = {
           if (!S.expenses)         S.expenses = [];
           if (!S.loginLog)         S.loginLog = [];
           if (!S.pendingApprovals) S.pendingApprovals = [];
+          if (!S.notifSnooze)      S.notifSnooze = {};
+          if (S.gcashCapital === undefined) S.gcashCapital = 0;
+          // Dedicated capital key — written by admin, read instantly by all users
+          try { const c=localStorage.getItem('kss_gcash_capital'); if(c!==null)S.gcashCapital=parseFloat(c)||0; } catch(e) {}
           if (!S._syncMeta)        S._syncMeta = { ..._DEFAULT_STATE._syncMeta };
           if (!S._syncMeta.deviceId) {
             S._syncMeta.deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
           }
-          // Keep localStorage in sync for the sync-access path
           try { localStorage.setItem(SK, raw); } catch(e) {}
         } catch(e) {}
       } else {
-        // IDB empty — fall back to localStorage (pre-migration state)
         this._load();
       }
     }).catch(() => {
-      // IDB unavailable — use localStorage
       this._load();
     });
   },
@@ -4978,7 +4984,27 @@ function expInvLogCSV(){
   dlCSV(`kyries_invlog_${new Date().toISOString().slice(0,10)}.csv`,c);
 }
 // GCASH
-function calcGF(){const a=parseFloat($('gca').value)||0,type=$('gct').value,rate=(S.gcashRates||{})[type]||1.5;if(a>0){const f=a*rate/100;$('gch').style.display='block';$('gch').textContent=`${rate}% of ${peso(a)} = ${peso(f)}`;$('gcf').value=f.toFixed(2);}else $('gch').style.display='none';}
+function calcGF(){
+  const a=parseFloat($('gca').value)||0,type=$('gct').value,rate=(S.gcashRates||{})[type]||1.5;
+  if(a>0){const f=a*rate/100;$('gch').style.display='block';$('gch').textContent=`${rate}% of ${peso(a)} = ${peso(f)}`;$('gcf').value=f.toFixed(2);}
+  else $('gch').style.display='none';
+  // Live wallet balance warning
+  const ww=$('gc-wallet-warning');
+  if(ww&&S.gcashCapital>0&&a>0){
+    const w=gcWalletCalc();
+    const reducesWallet=['Cash In','Send Money','Load / Bills Payment','Padala'].includes(type);
+    if(reducesWallet){
+      const after=w.walletBalance-a;
+      if(after<0){
+        ww.innerHTML=`<div class="al alr" style="font-size:12px;margin:4px 0">🚨 Exceeds wallet! Only <strong>${peso(w.walletBalance)}</strong> available.</div>`;
+      } else if(after<w.capital*0.1){
+        ww.innerHTML=`<div class="al ala" style="font-size:12px;margin:4px 0">⚠️ Wallet after: <strong>${peso(after)}</strong> (${((after/w.capital)*100).toFixed(0)}% left).</div>`;
+      } else {
+        ww.innerHTML=`<div style="font-size:11px;color:var(--tx3);margin:2px 0">Wallet after: <strong>${peso(after)}</strong></div>`;
+      }
+    } else { ww.innerHTML=''; }
+  } else if(ww){ ww.innerHTML=''; }
+}
 function resetGCashTodayIfNewDay(){
   const todayStr=today();
   if(S.gcashLastFeeDate!==todayStr){
@@ -4990,6 +5016,23 @@ function logGC(){
   const nm=$('gcn').value.trim()||'Customer',a=parseFloat($('gca').value)||0,type=$('gct').value,fee=parseFloat($('gcf').value)||0;
   if(!a||!fee){showMsg('gcmsg','❌ Enter amount and fee.','alr');return;}
   resetGCashTodayIfNewDay();
+  // ── WALLET CEILING CHECK ───────────────────────────────────────
+  // Cash In reduces the wallet. Block if it would push balance below zero.
+  // This keeps the wallet circulating within the capital amount.
+  if(S.gcashCapital > 0) {
+    const wallet = gcWalletCalc();
+    const walletAfter = wallet.walletBalance - a; // Cash In reduces wallet
+    const typesReduceWallet = ['Cash In','Send Money','Load / Bills Payment','Padala'];
+    if(typesReduceWallet.includes(type) && walletAfter < 0) {
+      showMsg('gcmsg','🚨 Insufficient GCash wallet balance. Current balance: ' + peso(wallet.walletBalance) + '. Cannot process ' + peso(a) + ' Cash In — wallet would be empty. Ask customer to cash out instead, or reload your GCash from your bank.','alr');
+      return;
+    }
+    if(typesReduceWallet.includes(type) && walletAfter < wallet.capital * 0.1) {
+      // Warn but allow if > 0
+      showMsg('gcmsg','⚠️ Warning: After this transaction your wallet will only have ' + peso(walletAfter) + ' left. Consider reloading GCash soon.','ala');
+      // Allow to continue - just a warning
+    }
+  }
   const gcEntry={nm,amount:a,type,fee,time:new Date().toLocaleString('en-PH'),by:CU?.nm};
   dataStore.createGCashEntry(gcEntry);
   S.gcashTodayFees=(S.gcashTodayFees||0)+fee;S.gcashAllFees=(S.gcashAllFees||0)+fee;
@@ -5061,7 +5104,7 @@ function renderGC(){
     </div>`;
   }).join(''):'<div style="color:var(--tx3);padding:20px;text-align:center">No transactions yet</div>';
   // Render wallet dashboard (admin only)
-  if (isAd()) renderGCWallet();
+  renderGCWallet(); // called for both admin and cashier
 }
 function saveGR(){
   if(!isAd()){showMsg('gcmsg','⛔ Only admin can change fee rates.','alr');return;}
@@ -5137,6 +5180,8 @@ function saveGCCapital() {
     btnClass:  'bp',
     onConfirm: (note) => {
       S.gcashCapital = val;
+      // Also save to its own key so ALL users (including cashier) get it instantly on next load
+      try { localStorage.setItem('kss_gcash_capital', String(val)); } catch(e) {}
       dataStore._persist();
       // Clear the input so it shows the new current value on next render
       const inp = $('gc-capital-input');
@@ -5149,7 +5194,7 @@ function saveGCCapital() {
 function renderGCWallet() {
   const ws = $('gc-wallet-section');
   if (!ws) return;
-  if (!isAd()) { ws.style.display = 'none'; return; }
+  // Both admin and cashier see the wallet bar — cashier needs to know balance too
   ws.style.display = 'block';
 
   const c   = gcWalletCalc();
