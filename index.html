@@ -1276,8 +1276,11 @@ input,select,textarea{padding:10px 13px;font-size:14px}
     <div style="font-size:42px;margin-bottom:10px">🗑</div>
     <h2>Reset complete</h2>
     <p class="msub" style="margin-top:6px">All data has been erased. The system will reload now.</p>
-    <div id="frdcnt" style="font-size:28px;font-weight:700;color:var(--rd);margin:16px 0">3</div>
-    <p style="font-size:12px;color:var(--tx3)">Reloading in <span id="frdcntlbl">3</span> seconds…</p>
+    <div id="frdcnt" style="font-size:48px;font-weight:800;color:var(--rd);margin:16px 0;line-height:1">5</div>
+    <p style="font-size:12px;color:var(--tx3)">Reloading in <span id="frdcntlbl">5</span> seconds…</p>
+    <div style="margin-top:16px">
+      <button id="frdcancel" class="btn bs" style="display:none;font-size:13px" onclick="cancelFactReset()">⬅ Cancel Reset (ESC)</button>
+    </div>
   </div>
 </div>
 <div class="ov" id="madmconf">
@@ -1286,8 +1289,10 @@ input,select,textarea{padding:10px 13px;font-size:14px}
     <p class="msub" id="madmconfsub"></p>
     <div class="mdat" id="madmconfdat"></div>
     <div class="fi" style="margin-top:12px">
+      <div id="madmconf-note-wrap">
       <label class="fl" id="madmconflbl">Admin note (optional)</label>
       <input type="text" id="madmconfnote" placeholder="Leave blank to skip…"/>
+      </div>
     </div>
     <div id="madmconfmsg"></div>
     <div class="mbt" style="margin-top:12px">
@@ -4104,6 +4109,41 @@ function addC(bc){
   renderCart();
 }
 $('bci').addEventListener('keydown',e=>{if(e.key==='Enter')scanItem();});
+
+// ── KEYBOARD: POS cash input — Enter shows confirmation popup
+// The cash input is rendered dynamically inside renderCart(), so we
+// use event delegation on the document instead of a direct listener.
+document.addEventListener('keydown', function kbGlobal(e) {
+  // ── ESC: close topmost open modal with exit confirmation ─────────────────
+  if (e.key === 'Escape') {
+    const modal = _topOpenModal();
+    if (modal) {
+      e.preventDefault();
+      _closeModalWithConfirm(modal);
+      return;
+    }
+    // ESC with no modal: if cart has items, confirm clear
+    if (e.target && e.target.id !== 'bci') {
+      const panel = document.querySelector('.panel.active');
+      if (panel && panel.id === 'tab-pos' && cart && cart.length > 0) {
+        // Already handled by clear cart button — do nothing on ESC
+      }
+    }
+    return;
+  }
+
+  // ── ENTER on cash input: show checkout confirmation popup ────────────────
+  if (e.key === 'Enter') {
+    const active = document.activeElement;
+    if (active && active.id === 'cshi') {
+      e.preventDefault();
+      const tot = cart.reduce((s,c)=>s+c.sell*c.qty, 0);
+      if (tot > 0) _showCheckoutConfirm(tot);
+      return;
+    }
+    // ENTER inside a text/number input that's NOT a modal field: do nothing special
+  }
+});
 function scanItem(){
   const q=$('bci').value.trim();if(!q)return;
   const p=findP(q);
@@ -4190,7 +4230,7 @@ function checkout(tot){
   let r=`${ln}\n${ctr(ss.storeName||"Kyrie's")}\n`;
   if(ss.address)r+=`${ctr(ss.address)}\n`;if(ss.contact)r+=`${ctr(ss.contact)}\n`;
   r+=`${ln}\n${now.toLocaleString('en-PH')}\nCashier: ${txn.cashier}\n${ln}\n`;
-  txn.items.forEach(i=>{const ulbl=i.ty==='stick'?'[/stick]':i.ty==='candy'||i.ty==='tingi'?'[tingi]':'';r+=`${i.nm}${ulbl?' '+ulbl:''}\n  ${i.qty} x ${peso(i.price)} = ${peso(i.price*i.qty)}\n`;});
+  txn.items.forEach(i=>{const ulbl=i.ty==='stick'?'[stick]':i.ty==='candy'||i.ty==='tingi'?'[tingi]':'';r+=`${i.nm}${ulbl?' '+ulbl:''}\n  ${i.qty} x ${peso(i.price)} = ${peso(i.price*i.qty)}\n`;});
   r+=`${ln}\nTOTAL:  ${peso(tot)}\nCASH:   ${peso(cash)}\nCHANGE: ${peso(change)}\n${ln}\n# ${code}\n${ln}\n${ctr(ss.footer||'Thank you!')}`;
   $('rcd').textContent='Receipt Code: '+code;$('rpre').textContent=r;$('rcrd').style.display='block';
   lrec=r;$('prc').innerHTML=`<pre>${r}</pre>`;
@@ -4581,7 +4621,7 @@ function buildRT(t){
   if(ss.address)r+=`${ctr(ss.address)}\n`;
   if(ss.contact)r+=`${ctr(ss.contact)}\n`;
   r+=`${ln}\n${t.date} ${t.time}\nCashier: ${t.cashier}\n${ln}\n`;
-  t.items.forEach(i=>{const ulbl=i.ty==='stick'?'[/stick]':i.ty==='candy'||i.ty==='tingi'?'[tingi]':'';r+=`${i.nm||i.name}${ulbl?' '+ulbl:''}\n  ${i.qty} x ${peso(i.price)} = ${peso(i.price*i.qty)}\n`;});
+  t.items.forEach(i=>{const ulbl=i.ty==='stick'?'[stick]':i.ty==='candy'||i.ty==='tingi'?'[tingi]':'';r+=`${i.nm||i.name}\n  ${i.qty} x ${peso(i.price)} = ${peso(i.price*i.qty)}${ulbl?' '+ulbl:''}\n`;});
   r+=`${ln}\nTOTAL: ${peso(t.total)}\nCASH:  ${peso(t.cash)}\nCHG:   ${peso(t.change)}\n${ln}\n# ${t.rc}`;
   if(t.status==='voided'){r+=`\n\n*** VOIDED ***`;if(t.voidReason)r+=`\nReason: ${t.voidReason}`;if(t.voidBy)r+=`\nBy: ${t.voidBy} · ${t.voidAt||''}`;}
   if(t.status==='returned'){r+=`\n\n*** RETURNED ***`;if(t.returnNote)r+=`\nReason: ${t.returnNote}`;if(t.returnBy)r+=`\nBy: ${t.returnBy} · ${t.returnAt||''}`;if(t.returnRef)r+=`\nRef: ${t.returnRef}`;}
@@ -5113,6 +5153,111 @@ function saveGR(){
   types.forEach(t=>{const v=parseFloat($('gr-'+t.replace(/[\s\/]/g,'_'))?.value)||1.5;newRates[t]=v;});
   dataStore.saveGCashRates(newRates);
   showMsg('gcmsg','✅ Rates saved!','alg');}
+// ── KEYBOARD HELPERS ──────────────────────────────────────────────────────
+
+// Returns the ID of the topmost currently-open modal, or null
+function _topOpenModal() {
+  const ORDER = ['mfactreset','mfactdone','madmconf','mreq','msc',
+                 'mia','mpm','mrst','mtxn','mret','mvapp','mdu','mdexp'];
+  for (let i = ORDER.length - 1; i >= 0; i--) {
+    const el = document.getElementById(ORDER[i]);
+    if (el && el.classList.contains('show')) return ORDER[i];
+  }
+  return null;
+}
+
+// Map each modal to its primary confirm function (for Enter key)
+const _MODAL_CONFIRM = {
+  mpm:       () => { const b = document.querySelector('#mpm .btn.bp,#mpm .btn.bd'); if(b)b.click(); },
+  mrst:      () => confRst(),
+  mret:      () => confRetT(),
+  madmconf:  () => doAdmConf(),
+  mreq:      () => submitCashierReq && submitCashierReq(),
+  mdu:       () => doDelU(),
+  mdexp:     () => doDelExp(),
+  msc:       () => doStockCtrl(),
+  // These modals have no single Enter-confirm (forms / info only)
+  mtxn: null, mia: null, mvapp: null, mfactreset: null, mfactdone: null,
+};
+
+// Close a modal — always with ESC, no confirm prompt for modals
+// (the modal itself already contains the action; ESC just cancels)
+function _closeModalWithConfirm(modalId) {
+  // Factory reset countdown — ESC cancels it (calls cancelFactReset)
+  if (modalId === 'mfactdone') {
+    cancelFactReset();
+    return;
+  }
+  // mret: ESC resets cashier mode flag before closing
+  if (modalId === 'mret') {
+    _cashierRetMode = false;
+    if($('mrettit')) $('mrettit').textContent = '↩ Process Return';
+    if($('mretconfbtn')) $('mretconfbtn').textContent = '↩ Confirm Return';
+    closeM('mret');
+    return;
+  }
+  closeM(modalId);
+}
+
+// ── CHECKOUT CONFIRMATION POPUP ────────────────────────────────────────────
+// Called when cashier presses Enter on the cash input.
+// Shows a clean summary: items, total, cash given, CHANGE (highlighted).
+function _showCheckoutConfirm(tot) {
+  const cash = parseFloat(document.getElementById('cshi')?.value) || 0;
+  if (!cash) { showMsg('scmsg','❌ Enter the cash amount first.','alr'); return; }
+  if (cash < tot) { showMsg('scmsg','❌ Cash is less than the total!','alr'); return; }
+  if (!cart || cart.length === 0) { showMsg('scmsg','❌ Cart is empty.','alr'); return; }
+
+  const change = cash - tot;
+
+  // Build the confirmation modal content
+  const itemRows = cart.map(c =>
+    `<div style="display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--bd);font-size:13px">
+      <div>
+        <span style="font-weight:600">${esc(c.nm)}</span>
+        <span style="color:var(--tx2);font-size:12px;margin-left:8px">${c.qty} × ${peso(c.sell)}</span>
+      </div>
+      <span style="font-weight:700">${peso(c.sell * c.qty)}</span>
+    </div>`
+  ).join('');
+
+  openAdmConf({
+    title: '🛒 Confirm Checkout',
+    sub: `<span style="color:var(--tx2)">${cart.length} item${cart.length!==1?'s':''} · Review before completing</span>`,
+    details: [],   // We'll use noteLabel area for the custom layout below
+    noteLabel: null,
+    btnLabel: '✅ Confirm & Complete Sale',
+    btnClass: 'bp',
+    customBody: `
+      <div style="margin-bottom:12px">
+        ${itemRows}
+      </div>
+      <div style="background:var(--sf2);border-radius:var(--rs);padding:12px;margin-bottom:4px">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+          <span style="color:var(--tx2)">Total</span>
+          <strong>${peso(tot)}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px">
+          <span style="color:var(--tx2)">Cash given</span>
+          <strong>${peso(cash)}</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          background:${change===0?'var(--gnb)':'#fef9c3'};
+          border:2px solid ${change===0?'var(--gn)':'#eab308'};
+          border-radius:var(--rs);padding:10px 14px">
+          <span style="font-size:15px;font-weight:700;color:${change===0?'var(--gnt)':'#92400e'}">
+            💰 CHANGE
+          </span>
+          <span style="font-size:28px;font-weight:800;color:${change===0?'var(--gn)':'#92400e'}">
+            ${peso(change)}
+          </span>
+        </div>
+      </div>`,
+    onConfirm: () => { checkout(tot); }
+  });
+}
+
 // ── GCASH WALLET MANAGER ──────────────────────────────────────────────────
 // Capital = total money admin loaded into GCash wallet
 // Wallet balance = capital + net flow from transactions + accumulated fees
@@ -5809,27 +5954,37 @@ function renderRequests(){
 }
 // ADMIN CONFIRM MODAL ENGINE — Phase 7B
 let _admConfCallback=null;
-function openAdmConf({title,sub,details=[],noteLabel='Admin note (optional)',btnLabel='Confirm',btnClass='btn bp',onConfirm}){
+function openAdmConf({title,sub,details=[],noteLabel='Admin note (optional)',btnLabel='Confirm',btnClass='btn bp',onConfirm,customBody}){
   $('madmconftit').textContent=title;
   $('madmconfsub').innerHTML=sub||'';
-  $('madmconfdat').innerHTML=details.map(d=>`<div class="mdr"><span>${d.label}</span><span>${d.value}</span></div>`).join('');
+  // Use customBody if provided (e.g. checkout confirm), otherwise render details
+  if(customBody){
+    $('madmconfdat').innerHTML=customBody;
+  } else {
+    $('madmconfdat').innerHTML=details.map(d=>`<div class="mdr"><span>${d.label}</span><span>${d.value}</span></div>`).join('');
+  }
   $('madmconfnote').value='';
   $('madmconfmsg').innerHTML='';
-  const lbl=$('madmconflbl');if(lbl)lbl.textContent=noteLabel;
+  // Hide note field when noteLabel is null (e.g. checkout confirm doesn't need a note)
+  const noteWrap=$('madmconf-note-wrap');
+  if(noteWrap)noteWrap.style.display=noteLabel===null?'none':'block';
+  const lbl=$('madmconflbl');if(lbl)lbl.textContent=noteLabel||'';
   const btn=$('madmconfbtn');
   if(btn){btn.textContent=btnLabel;btn.className='btn '+btnClass;}
   _admConfCallback=onConfirm;
   openM('madmconf');
-  setTimeout(()=>$('madmconfnote')?.focus(),120);
+  // Focus note field only when it's visible; otherwise focus the confirm button
+  setTimeout(()=>{
+    if(noteLabel===null){ $('madmconfbtn')?.focus(); }
+    else { $('madmconfnote')?.focus(); }
+  },120);
 }
 function doAdmConf(){
   const note=($('madmconfnote')?.value||'').trim();
-  if(_admConfCallback){
-    const result=_admConfCallback(note);
-    if(result===false)return;
-  }
-  closeM('madmconf');
+  const cb=_admConfCallback;
   _admConfCallback=null;
+  closeM('madmconf');          // close FIRST — then callback runs clean
+  if(cb) cb(note);
 }
 // Approve any non-void request — with confirm modal
 function rqApprove(id){
@@ -7490,7 +7645,6 @@ function doFactReset(){
   const pw=$('frpw').value;
   const conf=($('frconf').value||'').trim().toUpperCase();
   if(conf!=='RESET'){showMsg('frmsg','❌ You must type RESET to confirm.','alr');return;}
-  // Verify admin password
   const admin=S.users.find(u=>u.id===CU?.id);
   if(!admin||admin.pw!==btoa(pw)){
     showMsg('frmsg','❌ Wrong admin password. Reset cancelled.','alr');
@@ -7498,22 +7652,35 @@ function doFactReset(){
     validateFactReset();
     return;
   }
-  // All checks passed — close input modal, show countdown modal
   closeM('mfactreset');
   openM('mfactdone');
-  let secs=3;
-  const cntEl=$('frdcnt'),lblEl=$('frdcntlbl');
-  const tick=setInterval(()=>{
+  let secs=5;
+  let cancelled=false;
+  const cntEl=$('frdcnt'),lblEl=$('frdcntlbl'),cancelBtn=$('frdcancel');
+  if(cntEl)cntEl.textContent=secs;
+  if(lblEl)lblEl.textContent=secs;
+  if(cancelBtn)cancelBtn.style.display='inline-flex';
+  // Store interval ID so ESC and cancel button can stop it
+  _factResetTick=setInterval(()=>{
+    if(cancelled){clearInterval(_factResetTick);return;}
     secs--;
     if(cntEl)cntEl.textContent=secs;
     if(lblEl)lblEl.textContent=secs;
     if(secs<=0){
-      clearInterval(tick);
+      clearInterval(_factResetTick);
+      _factResetTick=null;
       dataStore.factoryReset();
       try{sessionStorage.removeItem('kyries_cu');}catch(e){}
       location.reload();
     }
   },1000);
+}
+let _factResetTick=null;
+function cancelFactReset(){
+  if(_factResetTick){clearInterval(_factResetTick);_factResetTick=null;}
+  closeM('mfactdone');
+  // Re-open the input modal so admin can try again or cancel
+  openM('mfactreset');
 }
 </script>
 </body>
